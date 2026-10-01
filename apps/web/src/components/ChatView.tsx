@@ -238,6 +238,7 @@ import {
   ChevronDownIcon,
   DownloadIcon,
   GitBranchIcon,
+  InfoIcon,
   Minimize2Icon,
   PaperclipIcon,
   WifiOffIcon,
@@ -455,6 +456,7 @@ import {
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
   resolveBackgroundDraftWorkspaceOptions,
+  buildMultipleModelThreadBootstrap,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   getAntigravitySendBlockReason,
@@ -6509,6 +6511,19 @@ export default function ChatView(props: ChatViewProps) {
     [feedbackSubmissions, routeThreadKey],
   );
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    const sharedWorkspaceItems: ComposerBannerStackItem[] =
+      isLocalDraftThread && multipleModelSelections !== null && !isGitRepo
+        ? [
+            {
+              id: "multiple-models-shared-workspace",
+              variant: "warning",
+              icon: <InfoIcon />,
+              title: "Models share this workspace",
+              description:
+                "All selected models can edit the same files. Use plan mode or give each model different files to change.",
+            },
+          ]
+        : [];
     const backgroundLivenessItems =
       backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem];
     const resumeCompactionItems =
@@ -6520,6 +6535,7 @@ export default function ChatView(props: ChatViewProps) {
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
+        ...sharedWorkspaceItems,
         ...feedbackBannerItems,
         ...usageLimitsItems,
         ...projectCloneItems,
@@ -6531,6 +6547,7 @@ export default function ChatView(props: ChatViewProps) {
       ];
     }
     return [
+      ...sharedWorkspaceItems,
       ...feedbackBannerItems,
       ...usageLimitsItems,
       ...projectCloneItems,
@@ -6584,7 +6601,10 @@ export default function ChatView(props: ChatViewProps) {
     feedbackBannerItems,
     handleRestoreThreadBranch,
     isRestoringThreadBranch,
+    isGitRepo,
+    isLocalDraftThread,
     localCheckoutBranchMismatch,
+    multipleModelSelections,
     parkedThreadBannerItem,
     projectCloneBannerItem,
     resumeCompactionBannerItem,
@@ -7414,16 +7434,15 @@ export default function ChatView(props: ChatViewProps) {
     if (
       multipleModelSelections !== null &&
       (!isLocalDraftThread ||
-        !isGitRepo ||
-        !activeThreadBranch ||
+        (isGitRepo && !activeThreadBranch) ||
         multipleModelSelections.length === 0)
     ) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "Choose models and a base branch",
+          title: "Choose models for a new thread",
           description:
-            "Multiple models need a new thread in a Git project. Each gets its own worktree.",
+            "Start from a new thread and select at least one model. Git projects also need a base branch.",
         }),
       );
       return;
@@ -7896,7 +7915,8 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     beginLocalDispatch({
-      preparingWorktree: multipleModelSelections !== null || Boolean(baseBranchForWorktree),
+      preparingWorktree:
+        (multipleModelSelections !== null && isGitRepo) || Boolean(baseBranchForWorktree),
       submissionIntent: resolvedSubmissionIntent,
     });
 
@@ -8003,7 +8023,7 @@ export default function ChatView(props: ChatViewProps) {
                   titleSeed: title,
                   runtimeMode,
                   interactionMode: target.interactionMode,
-                  bootstrap: {
+                  bootstrap: buildMultipleModelThreadBootstrap({
                     createThread: {
                       projectId: activeProject.id,
                       title,
@@ -8014,15 +8034,11 @@ export default function ChatView(props: ChatViewProps) {
                       worktreePath: null,
                       createdAt: messageCreatedAt,
                     },
-                    prepareWorktree: {
-                      projectCwd: activeProject.workspaceRoot,
-                      baseBranch: activeThreadBranch!,
-                      requireWorktree: true,
-                      branch: buildTemporaryWorktreeBranchName(randomHex),
-                      ...(startFromOrigin ? { startFromOrigin: true } : {}),
-                    },
-                    runSetupScript: true,
-                  },
+                    isGitRepo,
+                    projectCwd: activeProject.workspaceRoot,
+                    worktreeBranch: buildTemporaryWorktreeBranchName(randomHex),
+                    startFromOrigin,
+                  }),
                   createdAt: messageCreatedAt,
                 },
               });
@@ -10125,7 +10141,7 @@ export default function ChatView(props: ChatViewProps) {
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">
                               <BranchToolbar
-                                forceNewWorktree={multipleModelSelections !== null}
+                                forceNewWorktree={multipleModelSelections !== null && isGitRepo}
                                 ref={branchToolbarRef}
                                 environmentId={activeThread.environmentId}
                                 threadId={activeThread.id}

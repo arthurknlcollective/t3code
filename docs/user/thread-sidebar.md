@@ -38,8 +38,15 @@ worktree**, each background submission creates its own worktree.
 
 To send the same prompt to several models on web or desktop, **Shift-click** models
 in a new thread's model picker to add or remove them. A regular click returns to a
-single model. Choose a base branch and send. Each selection starts a separate thread
-and worktree while you stay in the new thread composer. This requires a Git project.
+single model. Send once to start a separate thread for each selection while you stay
+in the new thread composer. Models can come from different providers.
+
+In a Git project, choose a base branch first; each model gets its own worktree.
+In a Perforce workspace or another folder without Git, all models use the existing
+project folder. They share files and can overwrite each other's edits, so use this
+for parallel reviews or plans, or give each model different files to change. Open
+files for editing in Perforce as usual; T3 Code does not manage Perforce changelists
+or submit changes.
 
 ## Pin and reorder threads
 

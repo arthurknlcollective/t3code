@@ -17,6 +17,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
   type ThreadLinkedPullRequest,
+  type ThreadTurnStartBootstrap,
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -817,6 +818,35 @@ export function resolveSendEnvMode(input: {
   isGitRepo: boolean;
 }): DraftThreadEnvMode {
   return input.isGitRepo ? input.requestedEnvMode : "local";
+}
+
+// ponytail: non-Git models share files; use isolated Perforce clients when independent edits are needed.
+export function buildMultipleModelThreadBootstrap(input: {
+  createThread: NonNullable<ThreadTurnStartBootstrap["createThread"]>;
+  isGitRepo: boolean;
+  projectCwd: string;
+  worktreeBranch: string;
+  startFromOrigin: boolean;
+}): ThreadTurnStartBootstrap {
+  const baseBranch = input.isGitRepo ? input.createThread.branch : null;
+  if (input.isGitRepo && !baseBranch) {
+    throw new Error("Choose a base branch before starting multiple models.");
+  }
+  return {
+    createThread: { ...input.createThread, branch: baseBranch, worktreePath: null },
+    ...(baseBranch
+      ? {
+          prepareWorktree: {
+            projectCwd: input.projectCwd,
+            baseBranch,
+            requireWorktree: true,
+            branch: input.worktreeBranch,
+            ...(input.startFromOrigin ? { startFromOrigin: true } : {}),
+          },
+          runSetupScript: true,
+        }
+      : {}),
+  };
 }
 
 export function resolveBackgroundDraftWorkspaceOptions(input: {

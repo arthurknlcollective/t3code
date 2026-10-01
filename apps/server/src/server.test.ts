@@ -11689,6 +11689,102 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("starts the same prompt for different providers in a shared non-Git workspace", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const initRepository = vi.fn(() => Effect.void);
+      const createWorktree = vi.fn(() => Effect.die("Shared workspace must not create a worktree"));
+      const runForThread = vi.fn(() => Effect.succeed({ status: "no-script" as const }));
+      yield* buildAppUnderTest({
+        layers: {
+          vcsDriver: { initRepository },
+          gitVcsDriver: { createWorktree },
+          projectSetupScriptRunner: { runForThread },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+        },
+      });
+
+      const selections = [
+        defaultModelSelection,
+        { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-sonnet-4-5" },
+      ];
+      const text = "Review this Perforce workspace.";
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.forEach(
+            selections,
+            (modelSelection, index) =>
+              client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                type: "thread.turn.start",
+                commandId: CommandId.make(`cmd-shared-workspace-${index}`),
+                threadId: ThreadId.make(`thread-shared-workspace-${index}`),
+                message: {
+                  messageId: MessageId.make(`msg-shared-workspace-${index}`),
+                  role: "user",
+                  text,
+                  attachments: [],
+                },
+                modelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                bootstrap: {
+                  createThread: {
+                    projectId: defaultProjectId,
+                    title: text,
+                    modelSelection,
+                    runtimeMode: "full-access",
+                    interactionMode: "default",
+                    branch: null,
+                    worktreePath: null,
+                    createdAt,
+                  },
+                },
+                createdAt,
+              }),
+            { concurrency: "unbounded" },
+          ),
+        ),
+      );
+
+      for (const [index, modelSelection] of selections.entries()) {
+        const commands = dispatchedCommands.filter(
+          (command) =>
+            "threadId" in command && command.threadId === `thread-shared-workspace-${index}`,
+        );
+        assert.deepEqual(
+          commands.map((command) => command.type),
+          ["thread.create", "thread.message.user.append", "thread.turn.start"],
+        );
+        const created = commands[0];
+        assertTrue(created?.type === "thread.create");
+        if (created?.type === "thread.create") {
+          assert.equal(created.projectId, defaultProjectId);
+          assert.deepEqual(created.modelSelection, modelSelection);
+          assert.isNull(created.branch);
+          assert.isNull(created.worktreePath);
+        }
+        const started = commands[2];
+        assertTrue(started?.type === "thread.turn.start");
+        if (started?.type === "thread.turn.start") {
+          assert.equal(started.message.text, text);
+          assert.deepEqual(started.modelSelection, modelSelection);
+          assert.isUndefined(started.bootstrap);
+        }
+      }
+      assert.equal(initRepository.mock.calls.length, 0);
+      assert.equal(createWorktree.mock.calls.length, 0);
+      assert.equal(runForThread.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect(
     "bootstraps first-send worktree turns on the server before dispatching turn start",
     () =>

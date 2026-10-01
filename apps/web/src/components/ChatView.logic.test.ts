@@ -38,6 +38,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   buildLoadingThreadFromShell,
   buildRunningThreadTurnInterruptInput,
+  buildMultipleModelThreadBootstrap,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -1627,6 +1628,66 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("multiple model thread bootstrap", () => {
+  const input = {
+    createThread: {
+      projectId: ProjectId.make("project-1"),
+      title: "Review the parser",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "main",
+      worktreePath: "/worktrees/previous",
+      createdAt: now,
+    },
+    isGitRepo: true,
+    projectCwd: "/perforce/workspace",
+    worktreeBranch: "t3/model-1",
+    startFromOrigin: true,
+  } satisfies Parameters<typeof buildMultipleModelThreadBootstrap>[0];
+
+  it.each([null, "main"])(
+    "starts in a non-Git workspace without checkout or setup, with branch %s",
+    (branch) => {
+      const bootstrap = buildMultipleModelThreadBootstrap({
+        ...input,
+        isGitRepo: false,
+        createThread: { ...input.createThread, branch },
+      });
+      expect(bootstrap).toEqual({
+        createThread: { ...input.createThread, branch: null, worktreePath: null },
+      });
+    },
+  );
+
+  it.each([false, true])(
+    "requires an isolated Git worktree and setup with startFromOrigin=%s",
+    (startFromOrigin) => {
+      const bootstrap = buildMultipleModelThreadBootstrap({ ...input, startFromOrigin });
+      expect(bootstrap).toEqual({
+        createThread: { ...input.createThread, worktreePath: null },
+        prepareWorktree: {
+          projectCwd: input.projectCwd,
+          baseBranch: "main",
+          requireWorktree: true,
+          branch: input.worktreeBranch,
+          ...(startFromOrigin ? { startFromOrigin: true } : {}),
+        },
+        runSetupScript: true,
+      });
+    },
+  );
+
+  it("rejects a Git launch without a base branch", () => {
+    expect(() =>
+      buildMultipleModelThreadBootstrap({
+        ...input,
+        createThread: { ...input.createThread, branch: null },
+      }),
+    ).toThrow("Choose a base branch before starting multiple models.");
   });
 });
 
